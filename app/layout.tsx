@@ -1,44 +1,26 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import { AppShell } from "@/components/shared/app-shell";
-import { getHealth } from "@/lib/dashboard";
-import { getCurrentRole } from "@/lib/roles";
-import { getCurrentLocale } from "@/lib/i18n/locale";
+import { Outfit, Fraunces } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const outfit = Outfit({
+  variable: "--font-outfit",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Vantage Enterprise",
-  description: "Privacy-first enterprise treasury copilot",
+  title: "BillSpark — invoice sense, fast",
+  description: "Drop an invoice. We turn it into plain text, then Gemini pulls the facts, a summary, and advice.",
 };
 
-export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const [role, health, locale] = await Promise.all([
-    getCurrentRole(),
-    getHealth(),
-    getCurrentLocale(),
-  ]);
-
+export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang={locale}
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full">
-        <AppShell initialRole={role} initialHealth={health} initialLocale={locale}>
-          {children}
-        </AppShell>
-      </body>
+    <html lang="en" className={`${outfit.variable} ${fraunces.variable} h-full`}>
+      <body className="min-h-full">{children}</body>
     </html>
   );
 }
-

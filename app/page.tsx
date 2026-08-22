@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { InvoiceStudio } from "@/components/studio/invoice-studio";
 
 export default function Home() {
-  redirect("/invoices");
+  return <InvoiceStudio />;
 }

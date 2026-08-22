@@ -1,9 +1,5 @@
-import { DashboardView } from "@/components/dashboard/dashboard-view";
-import { getDashboardPayload } from "@/lib/dashboard";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default async function DashboardPage() {
-  const data = await getDashboardPayload();
-  return <DashboardView data={data} />;
+export default function RedirectPage() {
+  redirect("/");
 }

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { parseJsonObject } from "@/lib/validators";
-import type { Locale } from "@/lib/i18n/dictionaries";
 
 const lineItemSchema = z.object({
   description: z.string(),
@@ -24,7 +23,9 @@ export const invoiceAnalysisSchema = z.object({
   category: z.string().nullable().optional(),
   costCenterGuess: z.string().nullable().optional(),
   lineItems: z.array(lineItemSchema).default([]),
+  summary: z.string().default(""),
   brief: z.string().default(""),
+  advice: z.array(z.string()).default([]),
   risks: z
     .array(
       z.object({
@@ -42,16 +43,9 @@ export const invoiceAnalysisSchema = z.object({
 
 export type InvoiceAnalysis = z.infer<typeof invoiceAnalysisSchema>;
 
-const LANGUAGE: Record<Locale, string> = {
-  es: "español",
-  en: "English",
-  pt: "português",
-};
-
 export async function analyzeInvoiceText(input: {
   text: string;
   filename: string;
-  locale: Locale;
   knownBranches: string[];
   knownSuppliers: string[];
 }): Promise<{ analysis: InvoiceAnalysis; model: string; usedFallback: boolean }> {
@@ -62,18 +56,17 @@ export async function analyzeInvoiceText(input: {
     return { analysis: heuristicAnalysis(input), model: "local-heuristic", usedFallback: true };
   }
 
-  const prompt = `Eres analista AP para un grupo con varias sucursales. Responde SOLO JSON válido, sin markdown.
-Idioma de brief, risks, questions y checks: ${LANGUAGE[input.locale]}.
-Sucursales conocidas: ${input.knownBranches.join(", ") || "San José, Heredia, Alajuela, Cartago"}.
-Proveedores ya vistos: ${input.knownSuppliers.slice(0, 20).join("; ") || "ninguno"}.
-Archivo: ${input.filename}
+  const prompt = `You are an AP analyst for a multi-branch company. Return ONLY valid JSON. All prose in English.
+Known branches: ${input.knownBranches.join(", ") || "San José, Heredia, Alajuela, Cartago"}.
+Known suppliers: ${input.knownSuppliers.slice(0, 20).join("; ") || "none"}.
+File: ${input.filename}
 
-Texto plano de la factura (ya extraído localmente, no es imagen):
+Plain text already extracted locally (not an image):
 """
 ${input.text}
 """
 
-JSON exacto:
+JSON shape:
 {
   "invoiceNumber": "",
   "supplier": "",
@@ -90,17 +83,21 @@ JSON exacto:
   "category": null,
   "costCenterGuess": null,
   "lineItems": [{"description":"","qty":null,"amount":null}],
-  "brief": "4 frases max para CFO: qué es, a qué sucursal va, si hay algo raro, qué hacer",
-  "risks": [{"code":"DUPLICATE|ROUND_AMOUNT|MISSING_TAX|LATE_FEE|BRANCH_UNCLEAR|UNUSUAL_VENDOR","detail":"","severity":"low|medium|high"}],
-  "questionsForAp": ["preguntas concretas para el proveedor o AP"],
-  "cashImpact": "cuándo sale la caja",
-  "controllerChecks": ["3 chequeos humanos"],
+  "summary": "2 short sentences a busy AP clerk can read",
+  "brief": "3 sentences: what this bill is, which branch, what is unusual",
+  "advice": ["4 practical next steps based on THIS invoice"],
+  "risks": [{"code":"DUPLICATE|ROUND_AMOUNT|MISSING_TAX|LATE_FEE|BRANCH_UNCLEAR|UNUSUAL_VENDOR|PO_MISMATCH","detail":"","severity":"low|medium|high"}],
+  "questionsForAp": ["specific questions for the vendor or AP"],
+  "cashImpact": "when cash leaves and why it matters",
+  "controllerChecks": ["3 human checks"],
   "confidence": 0.0
 }`;
 
   try {
     const raw = await generateGeminiJson(key, model, prompt);
     const parsed = invoiceAnalysisSchema.parse(parseJsonObject(raw));
+    if (!parsed.summary) parsed.summary = parsed.brief;
+    if (parsed.advice.length === 0) parsed.advice = parsed.controllerChecks.slice(0, 4);
     return { analysis: parsed, model, usedFallback: false };
   } catch (error) {
     console.error("Gemini analysis failed; using heuristic.", error instanceof Error ? error.message : "error");
@@ -141,16 +138,16 @@ async function generateGeminiJson(apiKey: string, model: string, prompt: string)
 
 export async function checkGeminiHealth(): Promise<"online" | "demo" | "unavailable"> {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) return process.env.DEMO_MODE === "false" ? "unavailable" : "demo";
+  if (!key) return "unavailable";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 4000);
   try {
     const model = process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}`,
-      { headers: { "x-goog-api-key": key }, signal: controller.signal },
-    );
-    return res.ok || res.status === 200 || res.status === 404 ? "online" : "unavailable";
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}`, {
+      headers: { "x-goog-api-key": key },
+      signal: controller.signal,
+    });
+    return res.ok || res.status === 404 ? "online" : "unavailable";
   } catch {
     return "unavailable";
   } finally {
@@ -165,23 +162,29 @@ function heuristicAnalysis(input: {
 }): InvoiceAnalysis {
   const text = input.text;
   const invoiceNumber =
-    text.match(/(?:invoice|factura|n[úu]mero)[:\s#]*([A-Z0-9-]{4,})/i)?.[1] ?? `UPL-${Date.now().toString(36).toUpperCase()}`;
-  const totalMatch = text.match(/(?:total|importe)[:\s]*([0-9][0-9.,]*)/i);
+    text.match(/(?:invoice|factura|number)[:\s#]*([A-Z0-9-]{4,})/i)?.[1] ??
+    `UPL-${Date.now().toString(36).toUpperCase()}`;
+  const totalMatch = text.match(/(?:total)[:\s]*([0-9][0-9.,]*)/i);
   const total = totalMatch ? Number(totalMatch[1].replace(/,/g, "")) : null;
   const branchGuess =
     input.knownBranches.find((branch) => text.toLowerCase().includes(branch.toLowerCase())) ?? null;
 
   return invoiceAnalysisSchema.parse({
     invoiceNumber,
-    supplier: input.filename.replace(/\.[^.]+$/, "") || "Proveedor",
+    supplier: input.filename.replace(/\.[^.]+$/, "") || "Unknown supplier",
     branchGuess,
     total: Number.isFinite(total) ? total : null,
     currency: "USD",
-    brief:
-      "No se pudo completar Gemini. Se extrae un borrador desde el texto plano: revisa proveedor, total y sucursal a mano.",
-    risks: [{ code: "MODEL_UNAVAILABLE", detail: "Análisis heurístico local.", severity: "medium" }],
-    questionsForAp: ["¿El total incluye impuestos?"],
-    controllerChecks: ["Validar número de factura", "Confirmar sucursal", "Confirmar vencimiento"],
+    summary: "Gemini was unavailable. This is a local draft from the extracted plain text.",
+    brief: "Review supplier, total, and due date by hand before posting.",
+    advice: [
+      "Confirm the total includes tax.",
+      "Match the invoice to a purchase order.",
+      "Assign the correct branch before posting.",
+    ],
+    risks: [{ code: "MODEL_UNAVAILABLE", detail: "Local draft only.", severity: "medium" }],
+    questionsForAp: ["Does this total include tax?"],
+    controllerChecks: ["Verify invoice number", "Confirm branch", "Confirm due date"],
     confidence: 0.25,
   });
 }
