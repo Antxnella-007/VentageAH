@@ -1,8 +1,11 @@
+"use client";
+
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatUsdt } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/components/shared/i18n-provider";
 
 export function PendingBatchCard({
   batch,
@@ -18,15 +21,15 @@ export function PendingBatchCard({
     required: number;
   } | null;
 }) {
+  const { t } = useI18n();
+
   if (!batch) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Pending Treasury Batch</CardTitle>
+          <CardTitle>{t.dashboard.pendingBatch}</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          There is no payment batch waiting for approval.
-        </CardContent>
+        <CardContent className="text-sm text-muted-foreground">{t.dashboard.noBatch}</CardContent>
       </Card>
     );
   }
@@ -36,27 +39,33 @@ export function PendingBatchCard({
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between">
+      <CardHeader className="flex flex-row items-center justify-between gap-3">
         <div>
-          <CardTitle>Pending Treasury Batch</CardTitle>
+          <CardTitle>{t.dashboard.pendingBatch}</CardTitle>
           <p className="text-sm text-muted-foreground">{batch.name}</p>
         </div>
         <Link href="/treasury" className={cn(buttonVariants())}>
-          Review batch
+          {t.dashboard.reviewBatch}
         </Link>
       </CardHeader>
       <CardContent className="grid gap-4 sm:grid-cols-2">
-        <Metric label="Suppliers" value={String(batch.suppliers)} />
-        <Metric label="Total" value={formatUsdt(batch.totalAmount)} />
-        <Metric label="Approval status" value={`${batch.approvals.length} / ${batch.required} approvals`} />
-        <Metric label="Batch ID" value={batch.batchNumber} />
+        <Metric label={t.dashboard.suppliers} value={String(batch.suppliers)} />
+        <Metric label={t.dashboard.total} value={formatUsdt(batch.totalAmount)} />
+        <Metric
+          label={t.dashboard.approvalStatus}
+          value={`${batch.approvals.length} / ${batch.required}`}
+        />
+        <Metric label={t.dashboard.batchId} value={batch.batchNumber} />
         <p className="text-sm">
-          CFO: <span className={cfo ? "font-medium text-emerald-700" : "text-amber-700"}>{cfo ? "Approved" : "Pending"}</span>
+          {t.dashboard.cfo}:{" "}
+          <span className={cfo ? "font-medium text-emerald-700" : "text-amber-700"}>
+            {cfo ? t.dashboard.approved : t.dashboard.pending}
+          </span>
         </p>
         <p className="text-sm">
-          Controller:{" "}
+          {t.dashboard.controller}:{" "}
           <span className={controller ? "font-medium text-emerald-700" : "text-amber-700"}>
-            {controller ? "Approved" : "Pending"}
+            {controller ? t.dashboard.approved : t.dashboard.pending}
           </span>
         </p>
       </CardContent>

@@ -1,5 +1,8 @@
+"use client";
+
 import { Card, CardContent } from "@/components/ui/card";
 import { formatPercent, formatUsd } from "@/lib/format";
+import { useI18n } from "@/components/shared/i18n-provider";
 
 export function KpiCards({
   kpis,
@@ -14,26 +17,27 @@ export function KpiCards({
     localAiProcessing: number;
   };
 }) {
+  const { t } = useI18n();
   const items = [
     {
-      label: "Total Spend",
+      label: t.dashboard.totalSpend,
       value: formatUsd(kpis.totalSpend),
-      hint: `${formatPercent(kpis.totalSpendDelta)} this month`,
+      hint: `${formatPercent(kpis.totalSpendDelta)} ${t.dashboard.thisMonth} · ${t.dashboard.totalSpendHint}`,
     },
     {
-      label: "Pending Payments",
+      label: t.dashboard.pendingPayments,
       value: formatUsd(kpis.pendingPayments),
-      hint: "Awaiting treasury settlement",
+      hint: t.dashboard.pendingPaymentsHint,
     },
     {
-      label: "Invoices Processed",
-      value: kpis.invoicesProcessed.toLocaleString("en-US"),
-      hint: "Local document intelligence",
+      label: t.dashboard.invoicesProcessed,
+      value: kpis.invoicesProcessed.toLocaleString(),
+      hint: t.dashboard.invoicesHint,
     },
     {
-      label: "Detected Anomalies",
+      label: t.dashboard.anomalies,
       value: String(kpis.anomalies),
-      hint: kpis.anomalies ? "Requires finance review" : "Within expected range",
+      hint: kpis.anomalies ? t.dashboard.anomaliesHint : t.dashboard.anomaliesOk,
       alert: kpis.anomalies > 0,
     },
   ];
@@ -49,7 +53,7 @@ export function KpiCards({
             <p className={`mt-2 text-3xl font-semibold ${item.alert ? "text-red-700" : "text-navy"}`}>
               {item.value}
             </p>
-            <p className="mt-2 text-xs text-muted-foreground">{item.hint}</p>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">{item.hint}</p>
           </CardContent>
         </Card>
       ))}

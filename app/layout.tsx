@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "@/components/shared/app-shell";
 import { getHealth } from "@/lib/dashboard";
 import { getCurrentRole } from "@/lib/roles";
+import { getCurrentLocale } from "@/lib/i18n/locale";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -21,15 +22,19 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const [role, health] = await Promise.all([getCurrentRole(), getHealth()]);
+  const [role, health, locale] = await Promise.all([
+    getCurrentRole(),
+    getHealth(),
+    getCurrentLocale(),
+  ]);
 
   return (
     <html
-      lang="en"
+      lang={locale}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        <AppShell initialRole={role} initialHealth={health}>
+        <AppShell initialRole={role} initialHealth={health} initialLocale={locale}>
           {children}
         </AppShell>
       </body>

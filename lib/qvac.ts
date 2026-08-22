@@ -83,9 +83,10 @@ async function checkQvacHttp(): Promise<boolean> {
 export async function processInvoice(
   filePath: string,
   index = 0,
+  originalFilename?: string,
 ): Promise<ProcessInvoiceResult> {
   if (isDemoMode()) {
-    const demo = await processInvoiceDemo(filePath, index);
+    const demo = await processInvoiceDemo(filePath, index, originalFilename);
     return { ...demo, mode: "demo" };
   }
 
@@ -95,7 +96,7 @@ export async function processInvoice(
     return { ocrText, fields, mode: "qvac" };
   } catch (error) {
     console.error("QVAC invoice processing failed; using local fallback.", sanitizeError(error));
-    const demo = await processInvoiceDemo(filePath, index);
+    const demo = await processInvoiceDemo(filePath, index, originalFilename);
     return { ...demo, mode: "demo" };
   }
 }

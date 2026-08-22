@@ -1,3 +1,5 @@
+"use client";
+
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -9,6 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate, formatUsd } from "@/lib/format";
+import { useI18n } from "@/components/shared/i18n-provider";
 
 export function RecentInvoices({
   invoices,
@@ -23,21 +26,22 @@ export function RecentInvoices({
     status: string;
   }[];
 }) {
+  const { t } = useI18n();
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Recent invoices</CardTitle>
+        <CardTitle>{t.dashboard.recent}</CardTitle>
       </CardHeader>
       <CardContent>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Invoice</TableHead>
-              <TableHead>Supplier</TableHead>
-              <TableHead>Branch</TableHead>
-              <TableHead>Amount</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead>{t.dashboard.colInvoice}</TableHead>
+              <TableHead>{t.dashboard.colSupplier}</TableHead>
+              <TableHead>{t.dashboard.colBranch}</TableHead>
+              <TableHead>{t.dashboard.colAmount}</TableHead>
+              <TableHead>{t.dashboard.colDate}</TableHead>
+              <TableHead>{t.dashboard.colStatus}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -61,13 +65,13 @@ export function RecentInvoices({
 }
 
 export function InvoiceStatus({ status }: { status: string }) {
-  const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-    UPLOADED: { label: "Uploaded", variant: "secondary" },
-    PROCESSING: { label: "Processing", variant: "outline" },
-    PROCESSED: { label: "Processed", variant: "default" },
-    FLAGGED: { label: "Flagged", variant: "destructive" },
-    ERROR: { label: "Error", variant: "destructive" },
-  };
-  const item = map[status] ?? { label: status, variant: "secondary" as const };
-  return <Badge variant={item.variant}>{item.label}</Badge>;
+  const { t } = useI18n();
+  const labels = t.invoiceStatus as Record<string, string>;
+  const variant =
+    status === "FLAGGED" || status === "ERROR"
+      ? "destructive"
+      : status === "PROCESSED"
+        ? "default"
+        : "secondary";
+  return <Badge variant={variant}>{labels[status] ?? status}</Badge>;
 }

@@ -2,34 +2,32 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  FileText,
-  Landmark,
-  ScrollText,
-} from "lucide-react";
+import { FileText, Landmark, LayoutDashboard, ScrollText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/shared/status-dot";
+import { LanguageSwitcher } from "@/components/shared/language-switcher";
+import { useI18n } from "@/components/shared/i18n-provider";
 import type { HealthResponse } from "@/types";
-
-const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/invoices", label: "Invoices", icon: FileText },
-  { href: "/treasury", label: "Treasury", icon: Landmark },
-  { href: "/audit", label: "Audit Log", icon: ScrollText },
-];
 
 export function Sidebar({ health }: { health: HealthResponse | null }) {
   const pathname = usePathname();
+  const { t } = useI18n();
+
+  const nav = [
+    { href: "/dashboard", label: t.nav.dashboard, hint: t.nav.dashboardHint, icon: LayoutDashboard },
+    { href: "/invoices", label: t.nav.invoices, hint: t.nav.invoicesHint, icon: FileText },
+    { href: "/treasury", label: t.nav.treasury, hint: t.nav.treasuryHint, icon: Landmark },
+    { href: "/audit", label: t.nav.audit, hint: t.nav.auditHint, icon: ScrollText },
+  ];
 
   return (
-    <aside className="flex h-full w-[248px] shrink-0 flex-col bg-navy text-sidebar-foreground">
-      <div className="border-b border-white/10 px-5 py-6">
-        <p className="text-[11px] font-semibold tracking-[0.28em] text-white">VANTAGE</p>
-        <p className="mt-1 text-xs leading-5 text-slate-300">Enterprise Treasury Intelligence</p>
+    <aside className="flex h-full w-[300px] shrink-0 flex-col bg-navy text-sidebar-foreground">
+      <div className="border-b border-white/10 px-6 py-7">
+        <p className="text-xs font-semibold tracking-[0.32em] text-white">{t.brand}</p>
+        <p className="mt-2 text-sm leading-6 text-slate-300">{t.brandSub}</p>
       </div>
-      <nav className="flex-1 space-y-1 px-3 py-4">
-        {NAV.map((item) => {
+      <nav className="flex-1 space-y-2 px-4 py-5">
+        {nav.map((item) => {
           const active = pathname === item.href;
           const Icon = item.icon;
           return (
@@ -37,38 +35,34 @@ export function Sidebar({ health }: { health: HealthResponse | null }) {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors",
-                active
-                  ? "bg-white/10 font-medium text-white"
-                  : "text-slate-300 hover:bg-white/5 hover:text-white",
+                "flex items-start gap-3 rounded-xl px-3 py-3 transition-colors",
+                active ? "bg-white/12 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white",
               )}
             >
-              <Icon className="size-4" />
-              {item.label}
+              <Icon className="mt-0.5 size-5 shrink-0" />
+              <span>
+                <span className="block text-[15px] font-medium">{item.label}</span>
+                <span className="mt-0.5 block text-xs leading-5 text-slate-400">{item.hint}</span>
+              </span>
             </Link>
           );
         })}
       </nav>
-      <div className="space-y-3 border-t border-white/10 px-5 py-5 text-xs">
+      <div className="space-y-4 border-t border-white/10 px-5 py-5">
+        <LanguageSwitcher />
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-          Local services
+          {t.services}
         </p>
-        <ServiceRow label="QVAC Local AI" status={health?.qvac ?? "demo"} />
-        <ServiceRow label="WDK Treasury" status={health?.wdk ?? "dry-run"} />
+        <ServiceRow label={t.qvac} status={health?.qvac ?? "demo"} />
+        <ServiceRow label={t.wdk} status={health?.wdk ?? "dry-run"} />
       </div>
     </aside>
   );
 }
 
-function ServiceRow({
-  label,
-  status,
-}: {
-  label: string;
-  status: string;
-}) {
+function ServiceRow({ label, status }: { label: string; status: string }) {
   return (
-    <div className="flex items-center justify-between text-slate-200">
+    <div className="flex items-center justify-between text-sm text-slate-200">
       <span>{label}</span>
       <StatusDot status={status} />
     </div>

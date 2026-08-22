@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { DEMO_INVOICE_TEMPLATES } from "@/demo-data/catalog";
 import type { InvoiceExtract } from "@/lib/validators";
 
@@ -5,26 +6,40 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function processInvoiceDemo(filePath: string, index = 0): Promise<{
+function shortId(input: string): string {
+  return createHash("sha1").update(input).digest("hex").slice(0, 6).toUpperCase();
+}
+
+export async function processInvoiceDemo(
+  filePath: string,
+  index = 0,
+  originalFilename?: string,
+): Promise<{
   ocrText: string;
   fields: InvoiceExtract;
 }> {
   await delay(450 + (index % 3) * 180);
   const template = DEMO_INVOICE_TEMPLATES[index % DEMO_INVOICE_TEMPLATES.length];
+  const source = originalFilename || filePath.split("/").pop() || `upload-${index}`;
+  const unique = shortId(`${source}:${Date.now()}:${index}:${Math.random()}`);
+  const amountJitter = (Number.parseInt(unique.slice(0, 2), 16) % 350) + 40;
+  const fields: InvoiceExtract = {
+    ...template,
+    invoiceNumber: `UPL-${unique}`,
+    total: Math.round((template.total + amountJitter) * 100) / 100,
+    date: new Date().toISOString().slice(0, 10),
+  };
   const ocrText = [
-    `INVOICE ${template.invoiceNumber}`,
-    `Supplier: ${template.supplier}`,
-    `Bill to branch: ${template.branch}`,
-    `Invoice date: ${template.date}`,
-    `Total due: ${template.total.toFixed(2)} ${template.currency}`,
-    `Source: ${filePath.split("/").pop() ?? "upload"}`,
+    `INVOICE ${fields.invoiceNumber}`,
+    `Supplier: ${fields.supplier}`,
+    `Bill to branch: ${fields.branch}`,
+    `Invoice date: ${fields.date}`,
+    `Total due: ${fields.total.toFixed(2)} ${fields.currency}`,
+    `Source file: ${source}`,
     "Processed locally with QVAC (demo extraction).",
   ].join("\n");
 
-  return {
-    ocrText,
-    fields: { ...template },
-  };
+  return { ocrText, fields };
 }
 
 export function explainAnomalyDemo(input: {
