@@ -34,7 +34,6 @@ export async function GET() {
       compiled: compileInvoices(results),
     });
   } catch (error) {
-    console.error("Ledger failed", error instanceof Error ? error.message : "error");
     return NextResponse.json({ companies: [], results: [], compiled: compileInvoices([]) });
   }
 }
