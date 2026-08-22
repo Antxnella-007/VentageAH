@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum InvoiceStatus {
+  UPLOADED
+  PROCESSING
+  PROCESSED
+  FLAGGED
+  ERROR
+}
+
+enum ReconciliationStatus {
+  MATCHED
+  REVIEW_REQUIRED
+  NO_PURCHASE_ORDER
+}
+
+enum PurchaseOrderStatus {
+  OPEN
+  MATCHED
+  CLOSED
+}
+
+enum PaymentBatchStatus {
+  DRAFT
+  PENDING_APPROVAL
+  READY
+  EXECUTING
+  COMPLETED
+  PARTIAL_FAILURE
+  FAILED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  PREVIEWED
+  CONFIRMED
+  FAILED
+}
+
+model Branch {
+  id                  String          @id @default(cuid())
+  name                String          @unique
+  historicalAverage   Float
+  currentSpend        Float           @default(0)
+  invoices            Invoice[]
+  purchaseOrders      PurchaseOrder[]
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+}
+
+model PurchaseOrder {
+  id                   String               @id @default(cuid())
+  purchaseOrderNumber  String               @unique
+  supplier             String
+  branchId             String
+  branch               Branch               @relation(fields: [branchId], references: [id])
+  expectedAmount       Float
+  status               PurchaseOrderStatus  @default(OPEN)
+  invoices             Invoice[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+}
+
+model Invoice {
+  id                    String                 @id @default(cuid())
+  invoiceNumber         String
+  supplier              String
+  branchId              String
+  branch                Branch                 @relation(fields: [branchId], references: [id])
+  date                  DateTime
+  total                 Float
+  currency              String                 @default("USD")
+  status                InvoiceStatus          @default(UPLOADED)
+  sourceFile            String?
+  originalFilename      String?
+  ocrText               String?
+  reconciliationStatus  ReconciliationStatus?
+  purchaseOrderId       String?
+  purchaseOrder         PurchaseOrder?         @relation(fields: [purchaseOrderId], references: [id])
+  flagReason            String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  @@index([branchId])
+  @@index([status])
+  @@index([invoiceNumber])
+}
+
+model PaymentBatch {
+  id           String              @id @default(cuid())
+  batchNumber  String              @unique
+  name         String
+  totalAmount  Float
+  currency     String              @default("USDT")
+  status       PaymentBatchStatus  @default(DRAFT)
+  payments     Payment[]
+  approvals    Approval[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+}
+
+model Payment {
+  id                   String         @id @default(cuid())
+  batchId              String
+  batch                PaymentBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  supplier             String
+  destinationAddress   String
+  amount               Float
+  currency             String         @default("USDT")
+  status               PaymentStatus  @default(PENDING)
+  transactionHash      String?
+  errorMessage         String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([batchId])
+}
+
+model Approval {
+  id            String        @id @default(cuid())
+  batchId       String
+  batch         PaymentBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  approverName  String
+  role          String
+  approvedAt    DateTime      @default(now())
+
+  @@unique([batchId, role])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  eventType   String
+  actor       String
+  actorRole   String
+  description String
+  entityType  String?
+  entityId    String?
+  metadata    String?
+  createdAt   DateTime @default(now())
+
+  @@index([eventType])
+  @@index([createdAt])
+}
