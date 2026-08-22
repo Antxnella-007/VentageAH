@@ -25,6 +25,11 @@ async function main() {
   await prisma.invoice.deleteMany();
   await prisma.purchaseOrder.deleteMany();
   await prisma.branch.deleteMany();
+  await prisma.company.deleteMany();
+
+  const company = await prisma.company.create({
+    data: { name: "Pacific Retail Group" },
+  });
 
   const branches = [];
   for (const item of BRANCH_TARGETS) {
@@ -32,6 +37,7 @@ async function main() {
       await prisma.branch.create({
         data: {
           name: item.name,
+          companyId: company.id,
           historicalAverage: item.historicalAverage,
           currentSpend: item.currentSpend,
         },
@@ -187,6 +193,7 @@ async function main() {
       data: {
         invoiceNumber: invoice.invoiceNumber,
         supplier: invoice.supplier,
+        companyId: company.id,
         branchId: branchByName[invoice.branchName].id,
         date: invoice.date,
         total: invoice.total,

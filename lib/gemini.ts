@@ -12,6 +12,7 @@ export const invoiceAnalysisSchema = z.object({
   supplier: z.string().default("—"),
   supplierTaxId: z.string().nullable().optional(),
   buyer: z.string().nullable().optional(),
+  companyGuess: z.string().nullable().optional(),
   branchGuess: z.string().nullable().optional(),
   date: z.string().nullable().optional(),
   dueDate: z.string().nullable().optional(),
@@ -46,6 +47,8 @@ export type InvoiceAnalysis = z.infer<typeof invoiceAnalysisSchema>;
 export async function analyzeInvoiceText(input: {
   text: string;
   filename: string;
+  folderPath?: string;
+  knownCompanies: string[];
   knownBranches: string[];
   knownSuppliers: string[];
 }): Promise<{ analysis: InvoiceAnalysis; model: string; usedFallback: boolean }> {
@@ -56,10 +59,12 @@ export async function analyzeInvoiceText(input: {
     return { analysis: heuristicAnalysis(input), model: "local-heuristic", usedFallback: true };
   }
 
-  const prompt = `You are an AP analyst for a multi-branch company. Return ONLY valid JSON. All prose in English.
+  const prompt = `You are an AP analyst for a large group with many companies and branches. Return ONLY valid JSON. All prose in English.
+Known companies: ${input.knownCompanies.join(", ") || "Pacific Retail Group"}.
 Known branches: ${input.knownBranches.join(", ") || "San José, Heredia, Alajuela, Cartago"}.
 Known suppliers: ${input.knownSuppliers.slice(0, 20).join("; ") || "none"}.
 File: ${input.filename}
+Folder path (company / branch clues): ${input.folderPath || "none"}.
 
 Plain text already extracted locally (not an image):
 """
@@ -72,6 +77,7 @@ JSON shape:
   "supplier": "",
   "supplierTaxId": null,
   "buyer": null,
+  "companyGuess": null,
   "branchGuess": null,
   "date": "YYYY-MM-DD or null",
   "dueDate": "YYYY-MM-DD or null",
@@ -158,6 +164,8 @@ export async function checkGeminiHealth(): Promise<"online" | "demo" | "unavaila
 function heuristicAnalysis(input: {
   text: string;
   filename: string;
+  folderPath?: string;
+  knownCompanies?: string[];
   knownBranches: string[];
 }): InvoiceAnalysis {
   const text = input.text;
@@ -166,12 +174,16 @@ function heuristicAnalysis(input: {
     `UPL-${Date.now().toString(36).toUpperCase()}`;
   const totalMatch = text.match(/(?:total)[:\s]*([0-9][0-9.,]*)/i);
   const total = totalMatch ? Number(totalMatch[1].replace(/,/g, "")) : null;
+  const haystack = `${text} ${input.filename} ${input.folderPath ?? ""}`.toLowerCase();
   const branchGuess =
-    input.knownBranches.find((branch) => text.toLowerCase().includes(branch.toLowerCase())) ?? null;
+    input.knownBranches.find((branch) => haystack.includes(branch.toLowerCase())) ?? null;
+  const companyGuess =
+    input.knownCompanies?.find((company) => haystack.includes(company.toLowerCase())) ?? null;
 
   return invoiceAnalysisSchema.parse({
     invoiceNumber,
     supplier: input.filename.replace(/\.[^.]+$/, "") || "Unknown supplier",
+    companyGuess,
     branchGuess,
     total: Number.isFinite(total) ? total : null,
     currency: "USD",

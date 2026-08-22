@@ -1,9 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { MAX_UPLOAD_BYTES } from "@/lib/validators";
 
-const UPLOAD_ROOT = path.join(process.cwd(), "uploads");
+const UPLOAD_ROOT = process.env.VERCEL
+  ? path.join(os.tmpdir(), "billspark-uploads")
+  : path.join(process.cwd(), "uploads");
 
 const EXT_BY_MIME: Record<string, string> = {
   "image/png": ".png",

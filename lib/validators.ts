@@ -27,7 +27,7 @@ const ALLOWED_MIME = new Set([
 const ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".pdf", ".txt", ".csv", ".json", ".docx"]);
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-export const MAX_BATCH_FILES = 30;
+export const MAX_BATCH_FILES = 80;
 
 export function validateUploadFile(file: {
   name: string;

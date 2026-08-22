@@ -45,15 +45,29 @@ enum PaymentStatus {
   FAILED
 }
 
+model Company {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  branches  Branch[]
+  invoices  Invoice[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
 model Branch {
   id                  String          @id @default(cuid())
-  name                String          @unique
+  name                String
+  companyId           String
+  company             Company         @relation(fields: [companyId], references: [id])
   historicalAverage   Float
   currentSpend        Float           @default(0)
   invoices            Invoice[]
   purchaseOrders      PurchaseOrder[]
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
+
+  @@unique([companyId, name])
+  @@index([companyId])
 }
 
 model PurchaseOrder {
@@ -73,6 +87,8 @@ model Invoice {
   id                    String                 @id @default(cuid())
   invoiceNumber         String
   supplier              String
+  companyId             String
+  company               Company                @relation(fields: [companyId], references: [id])
   branchId              String
   branch                Branch                 @relation(fields: [branchId], references: [id])
   date                  DateTime
@@ -81,6 +97,7 @@ model Invoice {
   status                InvoiceStatus          @default(UPLOADED)
   sourceFile            String?
   originalFilename      String?
+  folderPath            String?
   ocrText               String?
   reconciliationStatus  ReconciliationStatus?
   purchaseOrderId       String?
@@ -97,9 +114,12 @@ model Invoice {
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
 
+  @@index([companyId])
   @@index([branchId])
   @@index([status])
   @@index([invoiceNumber])
+  @@index([supplier])
+  @@index([date])
 }
 
 model PaymentBatch {

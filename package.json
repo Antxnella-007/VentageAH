@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1 --port 43123",
     "build": "prisma generate && next build",
+    "postinstall": "prisma generate",
     "start": "next start --hostname 127.0.0.1 --port 43123",
     "lint": "eslint",
     "db:generate": "prisma generate",

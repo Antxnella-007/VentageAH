@@ -16,6 +16,7 @@ export async function POST() {
       data: {
         invoiceNumber: `TMP-DEMO-${index + 1}`,
         supplier: "Pending extraction",
+        companyId: defaultBranch.companyId,
         branchId: defaultBranch.id,
         date: new Date(),
         total: 0.01,

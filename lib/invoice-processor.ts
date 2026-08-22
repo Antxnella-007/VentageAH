@@ -62,7 +62,7 @@ async function processOne(
   try {
     const filePath = invoice.sourceFile ?? `memory://${invoice.invoiceNumber}`;
     const result = await processInvoice(filePath, index, invoice.originalFilename ?? undefined);
-    const branch = await prisma.branch.findUnique({ where: { name: result.fields.branch } });
+    const branch = await prisma.branch.findFirst({ where: { name: result.fields.branch } });
 
     await prisma.invoice.update({
       where: { id },

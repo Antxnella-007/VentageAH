@@ -2,119 +2,99 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { storeUpload } from "@/lib/uploads";
 import { extractPlainText } from "@/lib/extract-text";
-import { analyzeInvoiceText } from "@/lib/gemini";
+import { analyzeInvoiceText, type InvoiceAnalysis } from "@/lib/gemini";
 import { MAX_BATCH_FILES, validateUploadFile } from "@/lib/validators";
+import { isJunkFile, parseRelativePath } from "@/lib/folder-path";
+import { knownOrgNames, resolveCompanyAndBranch } from "@/lib/org";
+import { compileInvoices } from "@/lib/compile";
+import { mapPool } from "@/lib/map-pool";
+import { refreshBranchSpend } from "@/lib/invoice-processor";
+import { scoreRisk, type AnalyzePayload } from "@/lib/analyze-payload";
+
+export const maxDuration = 60;
+export const runtime = "nodejs";
+
+type Draft = {
+  fileName: string;
+  folderPath: string;
+  companyHint: string | null;
+  branchHint: string | null;
+  extraction: AnalyzePayload["extraction"];
+  model: string;
+  usedFallback: boolean;
+  analysis: InvoiceAnalysis;
+  storedName: string;
+};
 
 export async function POST(request: Request) {
   try {
     return await handleAnalyze(request);
   } catch (error) {
     console.error("Analyze failed", error instanceof Error ? error.message : "error");
-    return NextResponse.json({ error: "Could not finish this invoice. Try PDF or TXT." }, { status: 500 });
+    return NextResponse.json({ error: "Could not finish this batch. Try PDF or TXT files." }, { status: 500 });
   }
 }
 
 async function handleAnalyze(request: Request) {
   const form = await request.formData();
   const files = form.getAll("files").filter((item): item is File => item instanceof File);
+  const paths = form.getAll("paths").map((item) => String(item));
 
   if (files.length === 0) {
     return NextResponse.json({ error: "Drop at least one invoice." }, { status: 400 });
   }
   if (files.length > MAX_BATCH_FILES) {
-    return NextResponse.json({ error: "Up to 30 files at a time." }, { status: 400 });
+    return NextResponse.json({ error: "Up to 80 files per request. The page sends them in smaller waves." }, { status: 400 });
   }
 
-  let branches = await prisma.branch.findMany();
-  if (branches.length === 0) {
-    const created = await prisma.branch.create({
-      data: { name: "Headquarters", historicalAverage: 40000, currentSpend: 0 },
-    });
-    branches = [created];
-  }
-  const defaultBranch = branches.find((branch) => branch.name === "San José") ?? branches[0];
+  const incoming = files
+    .map((file, index) => {
+      const relative = paths[index] || file.webkitRelativePath || file.name;
+      return { file, relative };
+    })
+    .filter((item) => !isJunkFile(item.file.name));
 
+  const valid: typeof incoming = [];
+  const skipped: string[] = [];
+  for (const item of incoming) {
+    const check = validateUploadFile({ name: item.file.name, type: item.file.type, size: item.file.size });
+    if (!check.ok) {
+      skipped.push(`${item.file.name}: ${check.error}`);
+      continue;
+    }
+    valid.push(item);
+  }
+
+  if (valid.length === 0) {
+    return NextResponse.json({ error: skipped[0] ?? "No readable invoices in that drop." }, { status: 400 });
+  }
+
+  const names = await knownOrgNames();
   const knownSuppliers = [
-    ...new Set((await prisma.invoice.findMany({ select: { supplier: true }, take: 80 })).map((row) => row.supplier)),
+    ...new Set((await prisma.invoice.findMany({ select: { supplier: true }, take: 120 })).map((row) => row.supplier)),
   ];
 
-  const results = [];
-  for (const file of files) {
-    const check = validateUploadFile({ name: file.name, type: file.type, size: file.size });
-    if (!check.ok) {
-      return NextResponse.json({ error: check.error }, { status: 400 });
-    }
-
+  const drafts = await mapPool(valid, 2, async ({ file, relative }): Promise<Draft> => {
+    const parsed = parseRelativePath(relative);
     const stored = await storeUpload(file);
     const extraction = await extractPlainText({
       buffer: stored.buffer,
       filename: stored.originalFilename,
       mime: file.type,
     });
-
     const { analysis, model, usedFallback } = await analyzeInvoiceText({
       text: extraction.text,
       filename: stored.originalFilename,
-      knownBranches: branches.map((branch) => branch.name),
+      folderPath: parsed.folderPath,
+      knownCompanies: names.companies,
+      knownBranches: names.branches,
       knownSuppliers,
     });
-
-    const branch =
-      branches.find(
-        (item) => analysis.branchGuess && item.name.toLowerCase() === analysis.branchGuess.toLowerCase(),
-      ) ?? defaultBranch;
-
-    const duplicate = await prisma.invoice.findFirst({
-      where: { invoiceNumber: analysis.invoiceNumber, supplier: analysis.supplier },
-    });
-
-    if (duplicate && analysis.invoiceNumber !== "—") {
-      analysis.risks = [
-        {
-          code: "DUPLICATE",
-          detail: `${analysis.invoiceNumber} from ${analysis.supplier} is already in the register.`,
-          severity: "high",
-        },
-        ...analysis.risks,
-      ];
-    }
-
-    const riskScore = Math.min(
-      100,
-      analysis.risks.reduce(
-        (sum, risk) => sum + (risk.severity === "high" ? 40 : risk.severity === "medium" ? 20 : 8),
-        0,
-      ),
-    );
-
-    const total = analysis.total && analysis.total > 0 ? analysis.total : 0.01;
-    const invoice = await prisma.invoice.create({
-      data: {
-        invoiceNumber: analysis.invoiceNumber || `UPL-${Date.now()}`,
-        supplier: analysis.supplier || "Supplier",
-        branchId: branch.id,
-        date: analysis.date ? new Date(`${analysis.date}T12:00:00.000Z`) : new Date(),
-        total,
-        currency: analysis.currency || "USD",
-        status: analysis.risks.some((risk) => risk.severity === "high") ? "FLAGGED" : "PROCESSED",
-        sourceFile: stored.storedName,
-        originalFilename: stored.originalFilename,
-        ocrText: extraction.text,
-        extractedText: extraction.text,
-        analysisJson: JSON.stringify(analysis),
-        brief: analysis.summary || analysis.brief,
-        riskScore,
-        dueDate: analysis.dueDate,
-        taxAmount: analysis.taxAmount ?? undefined,
-        extractionMethod: extraction.method,
-        charsSent: extraction.sentLength,
-        flagReason: analysis.risks[0]?.detail,
-      },
-      include: { branch: true },
-    });
-
-    results.push({
-      id: invoice.id,
+    return {
+      fileName: stored.originalFilename,
+      folderPath: parsed.folderPath,
+      companyHint: parsed.companyHint,
+      branchHint: parsed.branchHint,
       extraction: {
         method: extraction.method,
         originalLength: extraction.originalLength,
@@ -123,19 +103,119 @@ async function handleAnalyze(request: Request) {
       },
       model,
       usedFallback,
-      riskScore,
       analysis,
-      invoice: {
-        id: invoice.id,
-        invoiceNumber: invoice.invoiceNumber,
-        supplier: invoice.supplier,
-        branch: invoice.branch.name,
-        total: invoice.total,
-        currency: invoice.currency,
-        originalFilename: invoice.originalFilename,
+      storedName: stored.storedName,
+    };
+  });
+
+  const seen = new Map<string, number>();
+  const results: AnalyzePayload[] = [];
+
+  for (const draft of drafts) {
+    const { company, branch } = await resolveCompanyAndBranch({
+      companyHint: draft.companyHint,
+      branchHint: draft.branchHint,
+      analysisCompany: draft.analysis.companyGuess,
+      analysisBranch: draft.analysis.branchGuess,
+    });
+
+    draft.analysis.companyGuess = company.name;
+    draft.analysis.branchGuess = branch.name;
+
+    const key = `${company.id}::${draft.analysis.invoiceNumber}::${draft.analysis.supplier}`.toLowerCase();
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+
+    const duplicate = await prisma.invoice.findFirst({
+      where: {
+        companyId: company.id,
+        invoiceNumber: draft.analysis.invoiceNumber,
+        supplier: draft.analysis.supplier,
       },
     });
+
+    if ((duplicate || (seen.get(key) ?? 0) > 1) && draft.analysis.invoiceNumber !== "—") {
+      draft.analysis.risks = [
+        {
+          code: "DUPLICATE",
+          detail: `${draft.analysis.invoiceNumber} from ${draft.analysis.supplier} is already in the ${company.name} register.`,
+          severity: "high",
+        },
+        ...draft.analysis.risks,
+      ];
+    }
+
+    const riskScore = scoreRisk(draft.analysis);
+    const total = draft.analysis.total && draft.analysis.total > 0 ? draft.analysis.total : 0.01;
+    const flagged = riskScore >= 40 || draft.analysis.risks.some((risk) => risk.severity === "high");
+
+    try {
+      const invoice = await prisma.invoice.create({
+        data: {
+          invoiceNumber: draft.analysis.invoiceNumber || `UPL-${Date.now()}`,
+          supplier: draft.analysis.supplier || "Supplier",
+          companyId: company.id,
+          branchId: branch.id,
+          date: draft.analysis.date ? new Date(`${draft.analysis.date}T12:00:00.000Z`) : new Date(),
+          total,
+          currency: draft.analysis.currency || "USD",
+          status: flagged ? "FLAGGED" : "PROCESSED",
+          sourceFile: draft.storedName,
+          originalFilename: draft.fileName,
+          folderPath: draft.folderPath || null,
+          ocrText: draft.extraction.preview,
+          extractedText: draft.extraction.preview,
+          analysisJson: JSON.stringify(draft.analysis),
+          brief: draft.analysis.summary || draft.analysis.brief,
+          riskScore,
+          dueDate: draft.analysis.dueDate,
+          taxAmount: draft.analysis.taxAmount ?? undefined,
+          extractionMethod: draft.extraction.method,
+          charsSent: draft.extraction.sentLength,
+          flagReason: draft.analysis.risks[0]?.detail,
+        },
+      });
+
+      results.push({
+        id: invoice.id,
+        extraction: draft.extraction,
+        model: draft.model,
+        usedFallback: draft.usedFallback,
+        riskScore,
+        analysis: draft.analysis,
+        company: company.name,
+        branch: branch.name,
+        originalFilename: draft.fileName,
+        folderPath: draft.folderPath,
+        status: invoice.status,
+      });
+    } catch (error) {
+      results.push({
+        id: `tmp-${draft.storedName}`,
+        extraction: draft.extraction,
+        model: draft.model,
+        usedFallback: draft.usedFallback,
+        riskScore,
+        analysis: draft.analysis,
+        company: company.name,
+        branch: branch.name,
+        originalFilename: draft.fileName,
+        folderPath: draft.folderPath,
+        status: "PROCESSED",
+      });
+      console.error("Persist skipped", error instanceof Error ? error.message : "error");
+    }
   }
 
-  return NextResponse.json({ count: results.length, results });
+  try {
+    await refreshBranchSpend();
+  } catch {
+    // Spend totals are best-effort on ephemeral hosts.
+  }
+
+  return NextResponse.json({
+    count: results.length,
+    skipped,
+    results,
+    compiled: compileInvoices(results),
+  });
 }

@@ -34,6 +34,7 @@ export async function POST(request: Request) {
       data: {
         invoiceNumber: `TMP-${stored.storedName.slice(0, 8)}`,
         supplier: "Pending extraction",
+        companyId: defaultBranch.companyId,
         branchId: defaultBranch.id,
         date: new Date(),
         total: 0.01,
