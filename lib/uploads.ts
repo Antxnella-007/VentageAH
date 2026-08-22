@@ -8,23 +8,43 @@ const UPLOAD_ROOT = path.join(process.cwd(), "uploads");
 const EXT_BY_MIME: Record<string, string> = {
   "image/png": ".png",
   "image/jpeg": ".jpg",
+  "image/webp": ".webp",
   "application/pdf": ".pdf",
+  "text/plain": ".txt",
+  "text/csv": ".csv",
+  "application/json": ".json",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
 };
 
 export async function storeUpload(file: File): Promise<{
   storedName: string;
   absolutePath: string;
   originalFilename: string;
+  buffer: Buffer;
 }> {
-  if (file.size > MAX_UPLOAD_BYTES) {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const stored = await storeBuffer(buffer, file.name, file.type);
+  return { ...stored, buffer };
+}
+
+export async function storeBuffer(
+  buffer: Buffer,
+  filename: string,
+  mime: string,
+): Promise<{ storedName: string; absolutePath: string; originalFilename: string }> {
+  if (buffer.byteLength > MAX_UPLOAD_BYTES) {
     throw new Error("Each document must be 10 MB or smaller.");
   }
 
   await mkdir(UPLOAD_ROOT, { recursive: true });
 
-  const original = path.basename(file.name).replace(/[^\w.\- ]+/g, "");
+  const original = path.basename(filename).replace(/[^\w.\- ]+/g, "");
   const extFromName = path.extname(original).toLowerCase();
-  const ext = EXT_BY_MIME[file.type] ?? ([".png", ".jpg", ".jpeg", ".pdf"].includes(extFromName) ? extFromName : ".bin");
+  const ext =
+    EXT_BY_MIME[mime] ??
+    ([".png", ".jpg", ".jpeg", ".webp", ".pdf", ".txt", ".csv", ".json", ".docx"].includes(extFromName)
+      ? extFromName
+      : ".bin");
   const storedName = `${Date.now()}-${randomBytes(8).toString("hex")}${ext}`;
   const absolutePath = path.join(UPLOAD_ROOT, storedName);
 
@@ -32,9 +52,7 @@ export async function storeUpload(file: File): Promise<{
     throw new Error("Invalid upload path.");
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(absolutePath, buffer);
-
   return { storedName, absolutePath, originalFilename: original };
 }
 

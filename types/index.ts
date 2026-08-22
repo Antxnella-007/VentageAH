@@ -4,6 +4,7 @@ export type ServiceStatus = "online" | "demo" | "unavailable" | "dry-run" | "err
 
 export type HealthResponse = {
   app: "online";
+  gemini?: "online" | "demo" | "unavailable";
   qvac: "online" | "demo" | "unavailable";
   wdk: "online" | "dry-run" | "unavailable";
   database: "online" | "unavailable";

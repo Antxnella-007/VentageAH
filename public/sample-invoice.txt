@@ -1,0 +1,19 @@
+INVOICE CN-8891
+Supplier: CloudNet Ltd
+Tax ID: 3-101-778899
+Bill to: Vantage Holdings — Cartago branch
+Invoice date: 2026-08-21
+Due date: 2026-09-20
+Payment terms: Net 30
+
+Description                     Qty     Amount
+Dedicated fiber 1Gbps            1      4200.00
+Firewall appliance               2      2800.00
+On-site installation             1      1400.00
+
+Subtotal                                8400.00
+IVA 13%                                 1092.00
+Total USD                               9492.00
+
+Notes: Recurring connectivity for Cartago data hall. PO expected 6200.
+Weekend support surcharge included.

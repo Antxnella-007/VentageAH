@@ -5,12 +5,13 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 import { InvoiceStatus } from "@/components/dashboard/recent-invoices";
 import { formatDate, formatUsd } from "@/lib/format";
 import { MAX_BATCH_FILES, validateUploadFile } from "@/lib/validators";
-import { interpolate, useI18n } from "@/components/shared/i18n-provider";
+import { useI18n } from "@/components/shared/i18n-provider";
 import { cn } from "@/lib/utils";
+import type { InvoiceAnalysis } from "@/lib/gemini";
 
 type InvoiceRow = {
   id: string;
@@ -22,8 +23,23 @@ type InvoiceRow = {
   currency: string;
   status: string;
   originalFilename?: string | null;
-  reconciliationStatus?: string | null;
   flagReason?: string | null;
+  brief?: string | null;
+};
+
+type AnalyzeResult = {
+  id: string;
+  extraction: {
+    method: string;
+    originalLength: number;
+    sentLength: number;
+    preview: string;
+  };
+  model: string;
+  usedFallback: boolean;
+  riskScore: number;
+  analysis: InvoiceAnalysis;
+  invoice: InvoiceRow & { brief?: string | null };
 };
 
 export function InvoiceWorkspace({ initialInvoices }: { initialInvoices: InvoiceRow[] }) {
@@ -31,10 +47,11 @@ export function InvoiceWorkspace({ initialInvoices }: { initialInvoices: Invoice
   const [invoices, setInvoices] = useState(initialInvoices);
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const [newIds, setNewIds] = useState<string[]>([]);
+  const [results, setResults] = useState<AnalyzeResult[]>([]);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const newIds = results.map((item) => item.id);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -46,12 +63,7 @@ export function InvoiceWorkspace({ initialInvoices }: { initialInvoices: Invoice
             .includes(q),
         )
       : invoices;
-    return [...filtered].sort((a, b) => {
-      const aNew = newIds.includes(a.id) ? 1 : 0;
-      const bNew = newIds.includes(b.id) ? 1 : 0;
-      if (aNew !== bNew) return bNew - aNew;
-      return 0;
-    });
+    return [...filtered].sort((a, b) => Number(newIds.includes(b.id)) - Number(newIds.includes(a.id)));
   }, [invoices, query, newIds]);
 
   async function refresh() {
@@ -59,44 +71,9 @@ export function InvoiceWorkspace({ initialInvoices }: { initialInvoices: Invoice
     if (!res.ok) return;
     const data = (await res.json()) as { invoices: InvoiceRow[] };
     setInvoices(data.invoices);
-    return data.invoices;
   }
 
-  async function processIds(ids: string[]) {
-    setBusy(true);
-    setNewIds(ids);
-    setProgress({ done: 0, total: ids.length });
-    const poll = window.setInterval(async () => {
-      const latest = await refresh();
-      if (!latest) return;
-      const finished = latest.filter(
-        (item) => ids.includes(item.id) && ["PROCESSED", "FLAGGED", "ERROR"].includes(item.status),
-      ).length;
-      setProgress({ done: finished, total: ids.length });
-    }, 400);
-
-    try {
-      const res = await fetch("/api/invoices/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids }),
-      });
-      if (!res.ok) {
-        const body = (await res.json()) as { error?: string };
-        throw new Error(body.error ?? t.invoices.toastFail);
-      }
-      toast.success(t.invoices.toastOk);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.invoices.toastFail);
-    } finally {
-      window.clearInterval(poll);
-      await refresh();
-      setProgress((current) => (current ? { ...current, done: current.total } : current));
-      setBusy(false);
-    }
-  }
-
-  async function uploadFiles(fileList: File[]) {
+  async function analyzeFiles(fileList: File[]) {
     if (fileList.length === 0) return;
     if (fileList.length > MAX_BATCH_FILES) {
       toast.error(t.invoices.tooMany);
@@ -114,43 +91,44 @@ export function InvoiceWorkspace({ initialInvoices }: { initialInvoices: Invoice
     fileList.forEach((file) => form.append("files", file));
     setBusy(true);
     try {
-      const res = await fetch("/api/invoices/upload", { method: "POST", body: form });
-      const body = (await res.json()) as { error?: string; ids?: string[] };
-      if (!res.ok) throw new Error(body.error ?? t.invoices.uploadFail);
-      await refresh();
-      if (body.ids) await processIds(body.ids);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.invoices.uploadFail);
-      setBusy(false);
-    }
-  }
-
-  async function loadDemoBatch() {
-    setBusy(true);
-    try {
-      const res = await fetch("/api/invoices/demo-batch", { method: "POST" });
-      const body = (await res.json()) as { error?: string; ids?: string[] };
+      const res = await fetch("/api/analyze", { method: "POST", body: form });
+      const body = (await res.json()) as { error?: string; results?: AnalyzeResult[] };
       if (!res.ok) throw new Error(body.error ?? t.invoices.toastFail);
+      setResults(body.results ?? []);
       await refresh();
-      if (body.ids) await processIds(body.ids);
+      toast.success(t.invoices.toastOk);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t.invoices.toastFail);
+    } finally {
       setBusy(false);
     }
   }
 
-  const percent = progress ? Math.round((progress.done / Math.max(progress.total, 1)) * 100) : 0;
-  const finished = Boolean(progress && !busy && progress.done >= progress.total);
+  async function loadSample() {
+    const res = await fetch("/sample-invoice.txt");
+    const blob = await res.blob();
+    const file = new File([blob], "sample-cloudnet-cartago.txt", { type: "text/plain" });
+    await analyzeFiles([file]);
+  }
 
   return (
     <div className="space-y-6">
-      <div className="max-w-3xl">
-        <h1 className="text-2xl font-semibold tracking-tight">{t.invoices.title}</h1>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">{t.invoices.intro}</p>
+      <div className="overflow-hidden rounded-3xl bg-navy px-6 py-10 text-white shadow-xl md:px-10">
+        <p className="text-xs font-semibold tracking-[0.28em] text-sky-200">VANTAGE · AP INTEL</p>
+        <h1 className="mt-3 max-w-2xl text-3xl font-semibold tracking-tight md:text-4xl">{t.invoices.title}</h1>
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">{t.invoices.intro}</p>
+        <div className="mt-6 flex flex-wrap gap-3 text-xs text-sky-100">
+          <span className="rounded-full bg-white/10 px-3 py-1">1. Texto plano local</span>
+          <span className="rounded-full bg-white/10 px-3 py-1">2. Gemini compacto</span>
+          <span className="rounded-full bg-white/10 px-3 py-1">3. Brief + riesgos + sucursal</span>
+        </div>
       </div>
 
       <Card
-        className={`border-dashed ${dragOver ? "border-navy bg-slate-50" : ""}`}
+        className={cn(
+          "border-2 border-dashed shadow-sm",
+          dragOver ? "border-navy bg-sky-50" : "border-slate-300",
+        )}
         onDragOver={(event) => {
           event.preventDefault();
           setDragOver(true);
@@ -159,51 +137,37 @@ export function InvoiceWorkspace({ initialInvoices }: { initialInvoices: Invoice
         onDrop={(event) => {
           event.preventDefault();
           setDragOver(false);
-          void uploadFiles(Array.from(event.dataTransfer.files));
+          void analyzeFiles(Array.from(event.dataTransfer.files));
         }}
       >
-        <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-          <p className="text-lg font-medium">{t.invoices.drop}</p>
+        <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+          <p className="text-xl font-medium">{t.invoices.drop}</p>
           <p className="max-w-lg text-sm text-muted-foreground">{t.invoices.dropHint}</p>
           <div className="flex flex-wrap justify-center gap-2">
-            <Button onClick={() => inputRef.current?.click()} disabled={busy}>
-              {t.invoices.select}
+            <Button size="lg" onClick={() => inputRef.current?.click()} disabled={busy}>
+              {busy ? t.invoices.processing : t.invoices.select}
             </Button>
-            <Button variant="outline" onClick={() => void loadDemoBatch()} disabled={busy}>
+            <Button size="lg" variant="outline" onClick={() => void loadSample()} disabled={busy}>
               {t.invoices.sample}
             </Button>
           </div>
           <input
             ref={inputRef}
             type="file"
-            accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
+            accept=".png,.jpg,.jpeg,.webp,.pdf,.txt,.csv,.json,.docx,image/png,image/jpeg,application/pdf,text/plain"
             multiple
             className="hidden"
             onChange={(event) => {
-              void uploadFiles(Array.from(event.target.files ?? []));
+              void analyzeFiles(Array.from(event.target.files ?? []));
               event.target.value = "";
             }}
           />
         </CardContent>
       </Card>
 
-      {(busy || progress) && (
-        <Card className={finished ? "border-emerald-200 bg-emerald-50/60" : ""}>
-          <CardHeader>
-            <CardTitle>{finished ? t.invoices.doneTitle : t.invoices.processing}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-2 text-sm text-muted-foreground">
-              {finished
-                ? interpolate(t.invoices.doneBody, { count: progress?.total ?? 0 })
-                : progress
-                  ? `${progress.done} ${t.invoices.of} ${progress.total} · ${percent}%`
-                  : t.invoices.preparing}
-            </p>
-            <Progress value={percent} />
-          </CardContent>
-        </Card>
-      )}
+      {results.map((result) => (
+        <AnalysisPanel key={result.id} result={result} />
+      ))}
 
       <Card>
         <CardHeader className="space-y-3">
@@ -222,7 +186,7 @@ export function InvoiceWorkspace({ initialInvoices }: { initialInvoices: Invoice
           {visible.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t.invoices.empty}</p>
           ) : (
-            visible.slice(0, 50).map((invoice) => {
+            visible.slice(0, 40).map((invoice) => {
               const isNew = newIds.includes(invoice.id);
               return (
                 <div
@@ -244,14 +208,6 @@ export function InvoiceWorkspace({ initialInvoices }: { initialInvoices: Invoice
                     <p className="text-sm text-muted-foreground">
                       {invoice.supplier} · {invoice.branch} · {formatDate(invoice.date)}
                     </p>
-                    {invoice.originalFilename ? (
-                      <p className="text-xs text-muted-foreground">
-                        {t.invoices.fromFile}: {invoice.originalFilename}
-                      </p>
-                    ) : null}
-                    {invoice.flagReason ? (
-                      <p className="mt-1 text-xs text-red-700">{invoice.flagReason}</p>
-                    ) : null}
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium">{formatUsd(invoice.total)}</span>
@@ -263,6 +219,99 @@ export function InvoiceWorkspace({ initialInvoices }: { initialInvoices: Invoice
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function AnalysisPanel({ result }: { result: AnalyzeResult }) {
+  const { analysis, extraction, riskScore, model, usedFallback } = result;
+  return (
+    <Card className="overflow-hidden border-navy/20 shadow-lg">
+      <div className="bg-gradient-to-r from-navy to-[#163056] px-6 py-5 text-white">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-sky-200">{analysis.supplier}</p>
+            <h2 className="mt-1 text-2xl font-semibold">{analysis.invoiceNumber}</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-200">{analysis.brief}</p>
+          </div>
+          <div className="rounded-2xl bg-white/10 px-4 py-3 text-right">
+            <p className="text-xs text-slate-300">Total</p>
+            <p className="text-2xl font-semibold">
+              {analysis.total != null ? formatUsd(analysis.total) : "—"} {analysis.currency}
+            </p>
+            <p className="text-xs text-amber-200">Riesgo {riskScore}/100</p>
+          </div>
+        </div>
+      </div>
+      <CardContent className="grid gap-4 p-6 lg:grid-cols-3">
+        <Info
+          label="Sucursal sugerida"
+          value={analysis.branchGuess ?? "Sin asignar"}
+        />
+        <Info label="Vencimiento" value={analysis.dueDate ?? "—"} />
+        <Info label="Impuestos" value={analysis.taxAmount != null ? formatUsd(analysis.taxAmount) : "—"} />
+        <Info label="Términos" value={analysis.paymentTerms ?? "—"} />
+        <Info label="Categoría" value={analysis.category ?? "—"} />
+        <Info label="Centro de costo" value={analysis.costCenterGuess ?? "—"} />
+        <div className="lg:col-span-3 rounded-xl bg-slate-50 p-4 text-xs text-muted-foreground">
+          Motor: {usedFallback ? "heurística local" : model} · {extraction.method} · {extraction.sentLength} /{" "}
+          {extraction.originalLength} caracteres enviados a Gemini (texto plano, no la imagen completa).
+        </div>
+        <div className="lg:col-span-2 space-y-2">
+          <p className="text-sm font-semibold">Preguntas para AP (lo que otros analizadores no hacen)</p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            {(analysis.questionsForAp.length ? analysis.questionsForAp : ["Revisar el total con el proveedor."]).map(
+              (item) => (
+                <li key={item}>{item}</li>
+              ),
+            )}
+          </ul>
+          <p className="pt-2 text-sm font-semibold">Chequeos del controller</p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            {analysis.controllerChecks.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+        <div className="space-y-2">
+          <p className="text-sm font-semibold">Riesgos</p>
+          {analysis.risks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Sin banderas fuertes.</p>
+          ) : (
+            analysis.risks.map((risk) => (
+              <div key={risk.code + risk.detail} className="rounded-lg border border-border p-3">
+                <Badge variant={risk.severity === "high" ? "destructive" : "secondary"}>{risk.severity}</Badge>
+                <p className="mt-1 text-sm">{risk.detail}</p>
+              </div>
+            ))
+          )}
+          <p className="text-xs text-muted-foreground">{analysis.cashImpact}</p>
+        </div>
+        {analysis.lineItems.length > 0 ? (
+          <div className="lg:col-span-3">
+            <p className="mb-2 text-sm font-semibold">Líneas</p>
+            <div className="space-y-1 text-sm">
+              {analysis.lineItems.slice(0, 12).map((line) => (
+                <div key={line.description} className="flex justify-between gap-4 border-b border-border/60 py-1">
+                  <span>{line.description}</span>
+                  <span className="text-muted-foreground">
+                    {line.qty ?? "—"} · {line.amount != null ? formatUsd(line.amount) : "—"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border p-3">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-1 text-sm font-medium">{value}</p>
     </div>
   );
 }

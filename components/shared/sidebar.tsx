@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileText, Landmark, LayoutDashboard, ScrollText } from "lucide-react";
+import { FileText, LayoutDashboard, ScrollText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/shared/status-dot";
 import { LanguageSwitcher } from "@/components/shared/language-switcher";
@@ -14,9 +14,8 @@ export function Sidebar({ health }: { health: HealthResponse | null }) {
   const { t } = useI18n();
 
   const nav = [
-    { href: "/dashboard", label: t.nav.dashboard, hint: t.nav.dashboardHint, icon: LayoutDashboard },
     { href: "/invoices", label: t.nav.invoices, hint: t.nav.invoicesHint, icon: FileText },
-    { href: "/treasury", label: t.nav.treasury, hint: t.nav.treasuryHint, icon: Landmark },
+    { href: "/dashboard", label: t.nav.dashboard, hint: t.nav.dashboardHint, icon: LayoutDashboard },
     { href: "/audit", label: t.nav.audit, hint: t.nav.auditHint, icon: ScrollText },
   ];
 
@@ -53,8 +52,8 @@ export function Sidebar({ health }: { health: HealthResponse | null }) {
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
           {t.services}
         </p>
-        <ServiceRow label={t.qvac} status={health?.qvac ?? "demo"} />
-        <ServiceRow label={t.wdk} status={health?.wdk ?? "dry-run"} />
+        <ServiceRow label={t.qvac} status={health?.gemini ?? health?.qvac ?? "demo"} />
+        <ServiceRow label={t.wdk} status="online" />
       </div>
     </aside>
   );

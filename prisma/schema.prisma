@@ -86,6 +86,14 @@ model Invoice {
   purchaseOrderId       String?
   purchaseOrder         PurchaseOrder?         @relation(fields: [purchaseOrderId], references: [id])
   flagReason            String?
+  extractedText         String?
+  analysisJson          String?
+  brief                 String?
+  riskScore             Int?
+  dueDate               String?
+  taxAmount             Float?
+  extractionMethod      String?
+  charsSent             Int?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
 

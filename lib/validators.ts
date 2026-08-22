@@ -16,10 +16,15 @@ export type InvoiceExtract = z.infer<typeof invoiceExtractSchema>;
 const ALLOWED_MIME = new Set([
   "image/png",
   "image/jpeg",
+  "image/webp",
   "application/pdf",
+  "text/plain",
+  "text/csv",
+  "application/json",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 
-const ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".pdf"]);
+const ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".pdf", ".txt", ".csv", ".json", ".docx"]);
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const MAX_BATCH_FILES = 30;
@@ -39,7 +44,7 @@ export function validateUploadFile(file: {
   const lower = file.name.toLowerCase();
   const ext = lower.slice(lower.lastIndexOf("."));
   if (!ALLOWED_EXT.has(ext)) {
-    return { ok: false, error: "Accepted formats: PNG, JPG, JPEG, PDF." };
+    return { ok: false, error: "Accepted formats: PNG, JPG, PDF, TXT, CSV, DOCX." };
   }
 
   if (file.type && !ALLOWED_MIME.has(file.type) && file.type !== "application/octet-stream") {
