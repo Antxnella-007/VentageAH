@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { compileInvoices } from "@/lib/compile";
 import { analysisFromRow } from "@/lib/analyze-payload";
 import { ensureDb } from "@/lib/ensure-db";
+import { refreshBranchSpend } from "@/lib/invoice-processor";
 
 export const runtime = "nodejs";
 
@@ -37,5 +38,16 @@ export async function GET() {
     });
   } catch (error) {
     return NextResponse.json({ companies: [], results: [], compiled: compileInvoices([]) });
+  }
+}
+
+export async function DELETE() {
+  try {
+    await ensureDb();
+    await prisma.invoice.deleteMany();
+    await refreshBranchSpend();
+    return NextResponse.json({ ok: true, results: [], compiled: compileInvoices([]) });
+  } catch {
+    return NextResponse.json({ error: "Could not clear the ledger." }, { status: 500 });
   }
 }

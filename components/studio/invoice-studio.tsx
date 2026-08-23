@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, FileText, Lightbulb, Upload } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileText, Lightbulb, RotateCcw, Upload } from "lucide-react";
 import type { AnalyzePayload } from "@/lib/analyze-payload";
 import { compileInvoices, type CompiledReport } from "@/lib/compile";
 
@@ -80,10 +80,21 @@ export function InvoiceStudio() {
     }
   }
 
-  async function sample() {
-    const res = await fetch("/sample-invoice.txt");
-    const blob = await res.blob();
-    await run([new File([blob], "sample-cloudnet.txt", { type: "text/plain" })]);
+  async function reset() {
+    if (!window.confirm("Clear every invoice from the ledger and start over?")) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/ledger", { method: "DELETE" });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Could not clear the ledger.");
+      setHistory([]);
+      setActive(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not clear the ledger.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -153,11 +164,12 @@ export function InvoiceStudio() {
             </button>
             <button
               type="button"
-              disabled={busy}
-              onClick={() => void sample()}
-              className="rounded-full bg-[#c2858c] px-6 py-3 text-sm font-semibold text-white hover:bg-[#d09aa0] disabled:opacity-60"
+              disabled={busy || history.length === 0}
+              onClick={() => void reset()}
+              className="inline-flex items-center gap-2 rounded-full bg-[#c2858c] px-6 py-3 text-sm font-semibold text-white hover:bg-[#d09aa0] disabled:opacity-60"
             >
-              Try the sample
+              <RotateCcw className="size-4" />
+              Reset ledger
             </button>
           </div>
           <p className="mt-4 text-xs text-[#902124]/60">PDF, Word, or spreadsheet · folders as Company / Branch · 10 MB each</p>
