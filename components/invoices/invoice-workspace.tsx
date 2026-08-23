@@ -11,7 +11,7 @@ import { formatDate, formatUsd } from "@/lib/format";
 import { MAX_BATCH_FILES, validateUploadFile } from "@/lib/validators";
 import { useI18n } from "@/components/shared/i18n-provider";
 import { cn } from "@/lib/utils";
-import type { InvoiceAnalysis } from "@/lib/gemini";
+import type { InvoiceAnalysis } from "@/lib/invoice-schema";
 
 type InvoiceRow = {
   id: string;

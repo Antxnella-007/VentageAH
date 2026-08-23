@@ -13,8 +13,9 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "BillSpark — invoice sense, fast",
-  description: "Drop an invoice. We turn it into plain text, then Gemini pulls the facts, a summary, and advice.",
+  title: "Vantage — invoice control for the group",
+  description:
+    "Upload invoices from every company and branch. Vantage captures the fields, flags risk, and compiles spend for AP.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

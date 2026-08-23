@@ -1,13 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #0b1020;
-  --paper: #fff8ef;
-  --coral: #ff4d6d;
-  --sun: #ffc53d;
-  --mint: #2ee6a6;
-  --violet: #7c5cff;
-  --sky: #3ec6ff;
+  --red: #902124;
+  --blue: #8eb9ff;
+  --wine: #4d0011;
+  --blush: #c2858c;
+  --paper: #ffffff;
+  --mist: #f7f1f2;
 }
 
 html,
@@ -17,12 +16,11 @@ body {
 
 body {
   margin: 0;
-  color: var(--ink);
+  color: var(--wine);
   background:
-    radial-gradient(900px 500px at 10% -10%, #ffc53d66, transparent 55%),
-    radial-gradient(800px 480px at 110% 0%, #7c5cff55, transparent 50%),
-    radial-gradient(700px 400px at 50% 110%, #2ee6a655, transparent 45%),
-    #0b1020;
+    radial-gradient(900px 420px at 0% -10%, #8eb9ff33, transparent 55%),
+    radial-gradient(700px 380px at 100% 0%, #c2858c33, transparent 50%),
+    #ffffff;
   font-family: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -31,11 +29,4 @@ body {
   to { transform: translateY(0); opacity: 1; }
 }
 
-@keyframes pulse-ring {
-  0% { transform: scale(0.96); opacity: 0.7; }
-  70% { transform: scale(1.04); opacity: 0.15; }
-  100% { transform: scale(0.96); opacity: 0.7; }
-}
-
 .animate-pop { animation: pop 0.45s ease both; }
-.pulse-ring { animation: pulse-ring 1.6s ease-in-out infinite; }

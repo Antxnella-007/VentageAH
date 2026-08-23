@@ -1,4 +1,4 @@
-import { invoiceAnalysisSchema, type InvoiceAnalysis } from "@/lib/gemini";
+import { invoiceAnalysisSchema, type InvoiceAnalysis } from "@/lib/invoice-schema";
 
 export type AnalyzePayload = {
   id: string;

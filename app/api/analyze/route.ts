@@ -31,7 +31,7 @@ export async function POST(request: Request) {
   try {
     return await handleAnalyze(request);
   } catch (error) {
-    console.error("Analyze failed", error instanceof Error ? error.message : "error");
+    console.error("Analyze failed", "batch error");
     return NextResponse.json({ error: "Could not finish this batch. Try PDF or TXT files." }, { status: 500 });
   }
 }

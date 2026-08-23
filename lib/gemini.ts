@@ -1,48 +1,16 @@
-import { z } from "zod";
+import "server-only";
 import { parseJsonObject } from "@/lib/validators";
+import { invoiceAnalysisSchema, type InvoiceAnalysis } from "@/lib/invoice-schema";
 
-const lineItemSchema = z.object({
-  description: z.string(),
-  qty: z.number().nullable().optional(),
-  amount: z.number().nullable().optional(),
-});
+export type { InvoiceAnalysis };
+export { invoiceAnalysisSchema };
 
-export const invoiceAnalysisSchema = z.object({
-  invoiceNumber: z.string().default("—"),
-  supplier: z.string().default("—"),
-  supplierTaxId: z.string().nullable().optional(),
-  buyer: z.string().nullable().optional(),
-  companyGuess: z.string().nullable().optional(),
-  branchGuess: z.string().nullable().optional(),
-  date: z.string().nullable().optional(),
-  dueDate: z.string().nullable().optional(),
-  subtotal: z.number().nullable().optional(),
-  taxAmount: z.number().nullable().optional(),
-  total: z.number().nullable().optional(),
-  currency: z.string().default("USD"),
-  paymentTerms: z.string().nullable().optional(),
-  category: z.string().nullable().optional(),
-  costCenterGuess: z.string().nullable().optional(),
-  lineItems: z.array(lineItemSchema).default([]),
-  summary: z.string().default(""),
-  brief: z.string().default(""),
-  advice: z.array(z.string()).default([]),
-  risks: z
-    .array(
-      z.object({
-        code: z.string(),
-        detail: z.string(),
-        severity: z.enum(["low", "medium", "high"]),
-      }),
-    )
-    .default([]),
-  questionsForAp: z.array(z.string()).default([]),
-  cashImpact: z.string().nullable().optional(),
-  controllerChecks: z.array(z.string()).default([]),
-  confidence: z.number().min(0).max(1).default(0.5),
-});
-
-export type InvoiceAnalysis = z.infer<typeof invoiceAnalysisSchema>;
+function redact(text: string) {
+  const key = process.env.GEMINI_API_KEY;
+  let out = text;
+  if (key) out = out.split(key).join("[redacted]");
+  return out.replace(/AQ\.[A-Za-z0-9_-]+/g, "[redacted]").replace(/AIza[A-Za-z0-9_-]+/g, "[redacted]");
+}
 
 export async function analyzeInvoiceText(input: {
   text: string;
@@ -52,11 +20,15 @@ export async function analyzeInvoiceText(input: {
   knownBranches: string[];
   knownSuppliers: string[];
 }): Promise<{ analysis: InvoiceAnalysis; model: string; usedFallback: boolean }> {
-  const key = process.env.GEMINI_API_KEY;
+  const key = process.env.GEMINI_API_KEY?.trim();
   const model = process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
 
-  if (!key || !input.text.trim()) {
-    return { analysis: heuristicAnalysis(input), model: "local-heuristic", usedFallback: true };
+  if (!key) {
+    console.error("Invoice reader is not configured: GEMINI_API_KEY is missing.");
+    return { analysis: heuristicAnalysis(input, "missing-key"), model: "unconfigured", usedFallback: true };
+  }
+  if (!input.text.trim()) {
+    return { analysis: heuristicAnalysis(input, "empty-text"), model: "empty", usedFallback: true };
   }
 
   const prompt = `You are an AP analyst for a large group with many companies and branches. Return ONLY valid JSON. All prose in English.
@@ -66,7 +38,7 @@ Known suppliers: ${input.knownSuppliers.slice(0, 20).join("; ") || "none"}.
 File: ${input.filename}
 Folder path (company / branch clues): ${input.folderPath || "none"}.
 
-Plain text already extracted locally (not an image):
+Invoice text:
 """
 ${input.text}
 """
@@ -106,8 +78,8 @@ JSON shape:
     if (parsed.advice.length === 0) parsed.advice = parsed.controllerChecks.slice(0, 4);
     return { analysis: parsed, model, usedFallback: false };
   } catch (error) {
-    console.error("Gemini analysis failed; using heuristic.", error instanceof Error ? error.message : "error");
-    return { analysis: heuristicAnalysis(input), model: "local-heuristic", usedFallback: true };
+    console.error("Invoice reader failed; using local draft.", redact(error instanceof Error ? error.message : "error"));
+    return { analysis: heuristicAnalysis(input, "reader-failed"), model: "fallback", usedFallback: true };
   }
 }
 
@@ -130,20 +102,19 @@ async function generateGeminiJson(apiKey: string, model: string, prompt: string)
   });
 
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Gemini HTTP ${res.status}: ${detail.slice(0, 180)}`);
+    throw new Error(`Reader HTTP ${res.status}`);
   }
 
   const json = (await res.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
   };
   const text = json.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
-  if (!text) throw new Error("Empty Gemini response");
+  if (!text) throw new Error("Empty reader response");
   return text;
 }
 
 export async function checkGeminiHealth(): Promise<"online" | "demo" | "unavailable"> {
-  const key = process.env.GEMINI_API_KEY;
+  const key = process.env.GEMINI_API_KEY?.trim();
   if (!key) return "unavailable";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 4000);
@@ -161,13 +132,16 @@ export async function checkGeminiHealth(): Promise<"online" | "demo" | "unavaila
   }
 }
 
-function heuristicAnalysis(input: {
-  text: string;
-  filename: string;
-  folderPath?: string;
-  knownCompanies?: string[];
-  knownBranches: string[];
-}): InvoiceAnalysis {
+function heuristicAnalysis(
+  input: {
+    text: string;
+    filename: string;
+    folderPath?: string;
+    knownCompanies?: string[];
+    knownBranches: string[];
+  },
+  reason: "missing-key" | "empty-text" | "reader-failed",
+): InvoiceAnalysis {
   const text = input.text;
   const invoiceNumber =
     text.match(/(?:invoice|factura|number)[:\s#]*([A-Z0-9-]{4,})/i)?.[1] ??
@@ -180,6 +154,13 @@ function heuristicAnalysis(input: {
   const companyGuess =
     input.knownCompanies?.find((company) => haystack.includes(company.toLowerCase())) ?? null;
 
+  const detail =
+    reason === "missing-key"
+      ? "Automatic reading is not configured. Add GEMINI_API_KEY to .env.local."
+      : reason === "empty-text"
+        ? "No readable text was found in this file."
+        : "Automatic reading failed. Review this invoice by hand.";
+
   return invoiceAnalysisSchema.parse({
     invoiceNumber,
     supplier: input.filename.replace(/\.[^.]+$/, "") || "Unknown supplier",
@@ -187,14 +168,14 @@ function heuristicAnalysis(input: {
     branchGuess,
     total: Number.isFinite(total) ? total : null,
     currency: "USD",
-    summary: "Gemini was unavailable. This is a local draft from the extracted plain text.",
+    summary: "This invoice was saved as a local draft until a full read succeeds.",
     brief: "Review supplier, total, and due date by hand before posting.",
     advice: [
       "Confirm the total includes tax.",
       "Match the invoice to a purchase order.",
       "Assign the correct branch before posting.",
     ],
-    risks: [{ code: "MODEL_UNAVAILABLE", detail: "Local draft only.", severity: "medium" }],
+    risks: [{ code: "NEEDS_REVIEW", detail, severity: "medium" }],
     questionsForAp: ["Does this total include tax?"],
     controllerChecks: ["Verify invoice number", "Confirm branch", "Confirm due date"],
     confidence: 0.25,

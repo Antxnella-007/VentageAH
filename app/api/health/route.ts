@@ -11,8 +11,3 @@ export async function GET() {
   const health = await getHealth();
   return NextResponse.json(health);
 }
-
-export async function GET() {
-  const health = await getHealth();
-  return NextResponse.json(health);
-}
