@@ -14,9 +14,3 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
-
-const nextConfig: NextConfig = {
-  serverExternalPackages: ["@prisma/client", "prisma", "@qvac/sdk", "pdf-parse", "tesseract.js", "mammoth"],
-};
-
-export default nextConfig;
