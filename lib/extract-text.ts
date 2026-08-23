@@ -1,4 +1,3 @@
-import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 import { createWorker } from "tesseract.js";
 
@@ -46,17 +45,15 @@ async function extractPlainTextInner(input: {
   const mime = input.mime.toLowerCase();
 
   if (mime.includes("pdf") || name.endsWith(".pdf")) {
-    const parser = new PDFParse({ data: new Uint8Array(input.buffer) });
     try {
-      const result = await parser.getText();
-      const clipped = clip(result.text);
+      const text = await extractPdfText(input.buffer);
+      const clipped = clip(text);
       return {
         ...clipped,
         method: clipped.text.length > 20 ? "pdf" : "empty",
-        pages: result.pages?.length,
       };
-    } finally {
-      await parser.destroy?.();
+    } catch {
+      return { text: "", method: "empty", originalLength: 0, sentLength: 0 };
     }
   }
 
@@ -92,4 +89,34 @@ async function extractPlainTextInner(input: {
 
   const clipped = clip(input.buffer.toString("utf8"));
   return { ...clipped, method: clipped.text.length > 20 ? "text" : "empty" };
+}
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  try {
+    const unpdf = await import("unpdf");
+    const pdf = await unpdf.getDocumentProxy(new Uint8Array(buffer));
+    const extracted = await unpdf.extractText(pdf, { mergePages: true });
+    const text = Array.isArray(extracted.text) ? extracted.text.join("\n") : extracted.text;
+    if (text && text.replace(/\s+/g, "").length > 12) return text;
+  } catch {
+    // Fall through to a lightweight scrape so the route still loads on Vercel.
+  }
+  return scrapePdfLiterals(buffer);
+}
+
+function scrapePdfLiterals(buffer: Buffer): string {
+  const raw = buffer.toString("latin1");
+  const chunks: string[] = [];
+  const pattern = /\((?:\\.|[^\\)]){2,}\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(raw))) {
+    const inner = match[0]
+      .slice(1, -1)
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "")
+      .replace(/\\t/g, " ")
+      .replace(/\\(.)/g, "$1");
+    if (/[A-Za-z0-9]/.test(inner)) chunks.push(inner);
+  }
+  return chunks.join(" ");
 }

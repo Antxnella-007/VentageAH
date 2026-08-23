@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db";
+import { useMemoryLedger } from "@/lib/runtime";
+import { memoryKnownNames, memoryResolveOrg } from "@/lib/memory-ledger";
 
 export async function resolveCompanyAndBranch(input: {
   companyHint?: string | null;
@@ -6,6 +8,16 @@ export async function resolveCompanyAndBranch(input: {
   analysisCompany?: string | null;
   analysisBranch?: string | null;
 }) {
+  if (useMemoryLedger()) {
+    const resolved = memoryResolveOrg({
+      companyHint: input.companyHint,
+      branchHint: input.branchHint,
+      analysisCompany: input.analysisCompany,
+      analysisBranch: input.analysisBranch,
+    });
+    return { company: resolved.company, branch: resolved.branch };
+  }
+
   const companies = await prisma.company.findMany({ include: { branches: true } });
   const companyName = input.companyHint || input.analysisCompany || companies[0]?.name || "Holding company";
 
@@ -34,6 +46,7 @@ export async function resolveCompanyAndBranch(input: {
 }
 
 export async function knownOrgNames() {
+  if (useMemoryLedger()) return memoryKnownNames();
   const companies = await prisma.company.findMany({ include: { branches: true }, orderBy: { name: "asc" } });
   return {
     companies: companies.map((row) => row.name),

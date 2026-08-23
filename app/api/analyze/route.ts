@@ -11,6 +11,13 @@ import { mapPool } from "@/lib/map-pool";
 import { refreshBranchSpend } from "@/lib/invoice-processor";
 import { scoreRisk, type AnalyzePayload } from "@/lib/analyze-payload";
 import { ensureDb } from "@/lib/ensure-db";
+import { useMemoryLedger } from "@/lib/runtime";
+import {
+  memoryFindDuplicate,
+  memorySaveInvoice,
+  memoryState,
+} from "@/lib/memory-ledger";
+import { jsonError, publicErrorMessage } from "@/lib/http";
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
@@ -31,29 +38,37 @@ export async function POST(request: Request) {
   try {
     return await handleAnalyze(request);
   } catch (error) {
-    console.error("Analyze failed", "batch error");
-    return NextResponse.json({ error: "Could not finish this batch. Try PDF or TXT files." }, { status: 500 });
+    console.error("Analyze failed", publicErrorMessage(error));
+    return jsonError("Could not finish this batch. Try a PNG, JPG, or TXT file.", 500);
   }
 }
 
 async function handleAnalyze(request: Request) {
-  await ensureDb();
+  if (!useMemoryLedger()) {
+    try {
+      await ensureDb();
+    } catch (error) {
+      console.error("Database unavailable during analyze", publicErrorMessage(error));
+      return jsonError("Database is unavailable.", 500);
+    }
+  }
+
   const form = await request.formData();
   const files = form.getAll("files").filter((item): item is File => item instanceof File);
   const paths = form.getAll("paths").map((item) => String(item));
 
   if (files.length === 0) {
-    return NextResponse.json({ error: "Drop at least one invoice." }, { status: 400 });
+    return jsonError("Drop at least one invoice.", 400);
   }
   if (files.length > MAX_BATCH_FILES) {
-    return NextResponse.json({ error: "Up to 80 files per request. The page sends them in smaller waves." }, { status: 400 });
+    return jsonError("Up to 80 files per request. The page sends them in smaller waves.", 400);
   }
 
   const incoming = files
-    .map((file, index) => {
-      const relative = paths[index] || file.webkitRelativePath || file.name;
-      return { file, relative };
-    })
+    .map((file, index) => ({
+      file,
+      relative: paths[index] || file.webkitRelativePath || file.name,
+    }))
     .filter((item) => !isJunkFile(item.file.name));
 
   const valid: typeof incoming = [];
@@ -68,52 +83,76 @@ async function handleAnalyze(request: Request) {
   }
 
   if (valid.length === 0) {
-    return NextResponse.json({ error: skipped[0] ?? "No readable invoices in that drop." }, { status: 400 });
+    return jsonError(skipped[0] ?? "No readable invoices in that drop.", 400);
   }
 
   const names = await knownOrgNames();
-  const knownSuppliers = [
-    ...new Set((await prisma.invoice.findMany({ select: { supplier: true }, take: 120 })).map((row) => row.supplier)),
-  ];
+  let knownSuppliers: string[] = [];
+  if (useMemoryLedger()) {
+    knownSuppliers = [...new Set(memoryState().invoices.map((row) => row.analysis.supplier))];
+  } else {
+    try {
+      knownSuppliers = [
+        ...new Set((await prisma.invoice.findMany({ select: { supplier: true }, take: 120 })).map((row) => row.supplier)),
+      ];
+    } catch (error) {
+      console.error("Could not load suppliers", publicErrorMessage(error));
+    }
+  }
 
-  const drafts = await mapPool(valid, 2, async ({ file, relative }): Promise<Draft> => {
-    const parsed = parseRelativePath(relative);
-    const stored = await storeUpload(file);
-    const extraction = await extractPlainText({
-      buffer: stored.buffer,
-      filename: stored.originalFilename,
-      mime: file.type,
-    });
-    const { analysis, model, usedFallback } = await analyzeInvoiceText({
-      text: extraction.text,
-      filename: stored.originalFilename,
-      folderPath: parsed.folderPath,
-      knownCompanies: names.companies,
-      knownBranches: names.branches,
-      knownSuppliers,
-    });
-    return {
-      fileName: stored.originalFilename,
-      folderPath: parsed.folderPath,
-      companyHint: parsed.companyHint,
-      branchHint: parsed.branchHint,
-      extraction: {
-        method: extraction.method,
-        originalLength: extraction.originalLength,
-        sentLength: extraction.sentLength,
-        preview: extraction.text.slice(0, 600),
-      },
-      model,
-      usedFallback,
-      analysis,
-      storedName: stored.storedName,
-    };
+  const drafts = await mapPool(valid, 2, async ({ file, relative }): Promise<Draft | null> => {
+    try {
+      const parsed = parseRelativePath(relative);
+      const stored = await storeUpload(file);
+      const extraction = await extractPlainText({
+        buffer: stored.buffer,
+        filename: stored.originalFilename,
+        mime: file.type,
+      });
+      const { analysis, model, usedFallback } = await analyzeInvoiceText({
+        text: extraction.text,
+        filename: stored.originalFilename,
+        folderPath: parsed.folderPath,
+        knownCompanies: names.companies,
+        knownBranches: names.branches,
+        knownSuppliers,
+      });
+      if ((file.type.includes("pdf") || stored.originalFilename.toLowerCase().endsWith(".pdf")) && !extraction.text.trim()) {
+        analysis.risks = [
+          {
+            code: "PDF_TEXT",
+            detail: "Could not read text from this PDF. PNG or JPG invoices still work.",
+            severity: "medium",
+          },
+          ...analysis.risks,
+        ];
+      }
+      return {
+        fileName: stored.originalFilename,
+        folderPath: parsed.folderPath,
+        companyHint: parsed.companyHint,
+        branchHint: parsed.branchHint,
+        extraction: {
+          method: extraction.method,
+          originalLength: extraction.originalLength,
+          sentLength: extraction.sentLength,
+          preview: extraction.text.slice(0, 600),
+        },
+        model,
+        usedFallback,
+        analysis,
+        storedName: stored.storedName,
+      };
+    } catch (error) {
+      skipped.push(`${file.name}: ${publicErrorMessage(error)}`);
+      return null;
+    }
   });
 
-  const seen = new Map<string, number>();
+  const usable = drafts.filter((draft): draft is Draft => Boolean(draft));
   const results: AnalyzePayload[] = [];
 
-  for (const draft of drafts) {
+  for (const draft of usable) {
     const { company, branch } = await resolveCompanyAndBranch({
       companyHint: draft.companyHint,
       branchHint: draft.branchHint,
@@ -124,33 +163,62 @@ async function handleAnalyze(request: Request) {
     draft.analysis.companyGuess = company.name;
     draft.analysis.branchGuess = branch.name;
 
-    const key = `${company.id}::${draft.analysis.invoiceNumber}::${draft.analysis.supplier}`.toLowerCase();
-    seen.set(key, (seen.get(key) ?? 0) + 1);
+    const flagged =
+      scoreRisk(draft.analysis) >= 40 || draft.analysis.risks.some((risk) => risk.severity === "high");
+    const total = draft.analysis.total && draft.analysis.total > 0 ? draft.analysis.total : 0.01;
+    const payload: AnalyzePayload = {
+      id: `mem-${draft.storedName}`,
+      extraction: draft.extraction,
+      model: draft.model,
+      usedFallback: draft.usedFallback,
+      riskScore: scoreRisk(draft.analysis),
+      analysis: draft.analysis,
+      company: company.name,
+      branch: branch.name,
+      originalFilename: draft.fileName,
+      folderPath: draft.folderPath,
+      status: flagged ? "FLAGGED" : "PROCESSED",
+    };
 
-    const duplicate = await prisma.invoice.findFirst({
-      where: {
-        companyId: company.id,
-        invoiceNumber: draft.analysis.invoiceNumber,
-        supplier: draft.analysis.supplier,
-      },
-    });
-
-    if ((duplicate || (seen.get(key) ?? 0) > 1) && draft.analysis.invoiceNumber !== "—") {
-      draft.analysis.risks = [
-        {
-          code: "DUPLICATE",
-          detail: `${draft.analysis.invoiceNumber} from ${draft.analysis.supplier} is already in the ${company.name} register.`,
-          severity: "high",
-        },
-        ...draft.analysis.risks,
-      ];
+    if (useMemoryLedger()) {
+      const duplicate = memoryFindDuplicate(company.name, draft.analysis.invoiceNumber, draft.analysis.supplier);
+      if (duplicate && draft.analysis.invoiceNumber !== "—") {
+        draft.analysis.risks = [
+          {
+            code: "DUPLICATE",
+            detail: `${draft.analysis.invoiceNumber} from ${draft.analysis.supplier} is already in the ${company.name} register.`,
+            severity: "high",
+          },
+          ...draft.analysis.risks,
+        ];
+        payload.analysis = draft.analysis;
+        payload.riskScore = scoreRisk(draft.analysis);
+        payload.status = "FLAGGED";
+      }
+      payload.id = `mem-${Date.now().toString(36)}-${results.length}`;
+      memorySaveInvoice(payload);
+      results.push(payload);
+      continue;
     }
 
-    const riskScore = scoreRisk(draft.analysis);
-    const total = draft.analysis.total && draft.analysis.total > 0 ? draft.analysis.total : 0.01;
-    const flagged = riskScore >= 40 || draft.analysis.risks.some((risk) => risk.severity === "high");
-
     try {
+      const duplicate = await prisma.invoice.findFirst({
+        where: {
+          companyId: company.id,
+          invoiceNumber: draft.analysis.invoiceNumber,
+          supplier: draft.analysis.supplier,
+        },
+      });
+      if (duplicate && draft.analysis.invoiceNumber !== "—") {
+        draft.analysis.risks = [
+          {
+            code: "DUPLICATE",
+            detail: `${draft.analysis.invoiceNumber} from ${draft.analysis.supplier} is already in the ${company.name} register.`,
+            severity: "high",
+          },
+          ...draft.analysis.risks,
+        ];
+      }
       const invoice = await prisma.invoice.create({
         data: {
           invoiceNumber: draft.analysis.invoiceNumber || `UPL-${Date.now()}`,
@@ -168,7 +236,7 @@ async function handleAnalyze(request: Request) {
           extractedText: draft.extraction.preview,
           analysisJson: JSON.stringify(draft.analysis),
           brief: draft.analysis.summary || draft.analysis.brief,
-          riskScore,
+          riskScore: scoreRisk(draft.analysis),
           dueDate: draft.analysis.dueDate,
           taxAmount: draft.analysis.taxAmount ?? undefined,
           extractionMethod: draft.extraction.method,
@@ -176,45 +244,34 @@ async function handleAnalyze(request: Request) {
           flagReason: draft.analysis.risks[0]?.detail,
         },
       });
-
       results.push({
+        ...payload,
         id: invoice.id,
-        extraction: draft.extraction,
-        model: draft.model,
-        usedFallback: draft.usedFallback,
-        riskScore,
-        analysis: draft.analysis,
-        company: company.name,
-        branch: branch.name,
-        originalFilename: draft.fileName,
-        folderPath: draft.folderPath,
         status: invoice.status,
+        analysis: draft.analysis,
+        riskScore: scoreRisk(draft.analysis),
       });
     } catch (error) {
-      results.push({
-        id: `tmp-${draft.storedName}`,
-        extraction: draft.extraction,
-        model: draft.model,
-        usedFallback: draft.usedFallback,
-        riskScore,
-        analysis: draft.analysis,
-        company: company.name,
-        branch: branch.name,
-        originalFilename: draft.fileName,
-        folderPath: draft.folderPath,
-        status: "PROCESSED",
-      });
-      console.error("Persist skipped", error instanceof Error ? error.message : "error");
+      console.error("Persist skipped", publicErrorMessage(error));
+      memorySaveInvoice(payload);
+      results.push(payload);
     }
   }
 
-  try {
-    await refreshBranchSpend();
-  } catch {
-    // Spend totals are best-effort on ephemeral hosts.
+  if (!useMemoryLedger()) {
+    try {
+      await refreshBranchSpend();
+    } catch (error) {
+      console.error("Spend refresh skipped", publicErrorMessage(error));
+    }
+  }
+
+  if (results.length === 0) {
+    return jsonError(skipped[0] ?? "Could not read those invoices.", 500);
   }
 
   return NextResponse.json({
+    source: useMemoryLedger() ? "demo" : "database",
     count: results.length,
     skipped,
     results,

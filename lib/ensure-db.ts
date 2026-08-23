@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { prisma, resolveDatabaseUrl } from "@/lib/db";
+import { useMemoryLedger } from "@/lib/runtime";
 
 let ready = false;
 
 export async function ensureDb() {
+  if (useMemoryLedger()) return;
   if (ready) return;
   try {
     await prisma.company.findMany({ take: 1 });

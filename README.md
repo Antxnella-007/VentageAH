@@ -43,6 +43,7 @@ In the Vercel project → Settings → Environment Variables (Production and Pre
 | `GEMINI_API_KEY` | your key |
 | `GEMINI_MODEL` | `gemini-3.6-flash` |
 | `GEMINI_MAX_CHARS` | `8000` |
+| `DEMO_MODE` | `true` |
 | `DATABASE_URL` | `file:/tmp/billspark.db` |
 
-Never commit `.env` or `.env.local`. Hobby SQLite on `/tmp` can reset when a new instance boots.
+SQLite on Vercel is **not persistent**. For the hackathon, set `DEMO_MODE=true` so the ledger runs in memory and the demo stays usable. Local `npm run dev` still uses SQLite when `DEMO_MODE` is false.

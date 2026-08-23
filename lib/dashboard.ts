@@ -3,13 +3,18 @@ import { detectBranchAnomalies } from "@/lib/anomaly";
 import { environmentLabel, isDemoMode } from "@/lib/config";
 import { checkGeminiHealth } from "@/lib/gemini";
 import type { HealthResponse } from "@/types";
+import { useMemoryLedger } from "@/lib/runtime";
 
 export async function getHealth(): Promise<HealthResponse> {
   let database: HealthResponse["database"] = "online";
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-  } catch {
-    database = "unavailable";
+  if (useMemoryLedger()) {
+    database = "online";
+  } else {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch {
+      database = "unavailable";
+    }
   }
 
   const gemini = await checkGeminiHealth();

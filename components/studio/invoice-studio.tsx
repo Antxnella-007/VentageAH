@@ -38,6 +38,10 @@ export function InvoiceStudio() {
   async function loadLedger() {
     try {
       const res = await fetch("/api/ledger");
+      if (!res.ok) {
+        const failed = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(failed?.error ?? "Could not load the ledger.");
+      }
       const body = (await res.json()) as { results?: AnalyzePayload[] };
       if (body.results?.length) {
         setHistory(body.results);
@@ -64,8 +68,11 @@ export function InvoiceStudio() {
           form.append("paths", file.webkitRelativePath || file.name);
         }
         const res = await fetch("/api/analyze", { method: "POST", body: form });
+        if (!res.ok) {
+          const failed = (await res.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(failed?.error ?? "Could not read that batch.");
+        }
         const body = (await res.json()) as { error?: string; results?: AnalyzePayload[] };
-        if (!res.ok) throw new Error(body.error ?? "Could not read that batch.");
         merged.push(...(body.results ?? []));
         setHistory((prev) => mergeHistory(merged, prev));
         const latest = merged[merged.length - 1];
@@ -86,8 +93,11 @@ export function InvoiceStudio() {
     setBusy(true);
     try {
       const res = await fetch("/api/ledger", { method: "DELETE" });
-      const body = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(body.error ?? "Could not clear the ledger.");
+      if (!res.ok) {
+        const failed = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(failed?.error ?? "Could not clear the ledger.");
+      }
+      await res.json().catch(() => null);
       setHistory([]);
       setActive(null);
     } catch (err) {
