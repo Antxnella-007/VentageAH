@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Vantage
 
 Invoice control for a group with many companies, many branches, and many invoices.
@@ -46,3 +47,6 @@ In the Vercel project → Settings → Environment Variables (Production and Pre
 | `DATABASE_URL` | `file:/tmp/billspark.db` |
 
 Never commit `.env` or `.env.local`. Hobby SQLite on `/tmp` can reset when a new instance boots.
+=======
+
+>>>>>>> 8079eb59397d84bf9f4a6bf80e3c13ef3f776433
