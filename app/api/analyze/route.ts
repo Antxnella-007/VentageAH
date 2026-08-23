@@ -10,6 +10,7 @@ import { compileInvoices } from "@/lib/compile";
 import { mapPool } from "@/lib/map-pool";
 import { refreshBranchSpend } from "@/lib/invoice-processor";
 import { scoreRisk, type AnalyzePayload } from "@/lib/analyze-payload";
+import { ensureDb } from "@/lib/ensure-db";
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
 }
 
 async function handleAnalyze(request: Request) {
+  await ensureDb();
   const form = await request.formData();
   const files = form.getAll("files").filter((item): item is File => item instanceof File);
   const paths = form.getAll("paths").map((item) => String(item));

@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { compileInvoices } from "@/lib/compile";
 import { analysisFromRow } from "@/lib/analyze-payload";
+import { ensureDb } from "@/lib/ensure-db";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
+    await ensureDb();
     const [companies, invoices] = await Promise.all([
       prisma.company.findMany({
         include: { branches: { orderBy: { name: "asc" } } },
